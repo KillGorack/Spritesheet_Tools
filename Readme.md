@@ -18,10 +18,31 @@ Built with Python, Tkinter, Pillow, and apng, this tool provides fast utilities 
 ### Format Conversion
 - **BMP → PNG Converter** — Recursively converts `.bmp` files inside a folder to `.png`, with optional overwrite and delete‑original behavior.
 
+
+### Assumptions & Notes
+
+- **APNG Tools (all three)** — These assume each frame is **128×128 pixels**.  
+  You can change this in the config: `FRAME_SIZE`.
+
+- **Atlas Dissector** — Also assumes **128×128** frames.  
+  Controlled by the same `FRAME_SIZE` setting.
+
+- **Orthogonal Resizer** — Assumes your spritesheet is built from **512×512 base frames**.  
+  This is controlled by `BASE_FRAME_SIZE`.
+
+  **Important:**  
+  This tool expects a *perfectly clean* spritesheet.  
+  Any gutters, padding, spacing, or margins between frames will break the scaling math.  
+  If your sheet has baked‑in spacing, resize manually using a calculator.
+
+- **Frame Stitcher** — All input images must be **exactly the same size**.  
+  The tool does not attempt to normalize or resize mismatched frames.
+
+- **BMP → PNG Converter** — A simple utility added mainly for convenience after moving from Windows to Linux. If i needed more I would have built this a little more procedural. (maybe later)
+
+
 ## Requirements
-
 Install dependencies:
-
 pip install pillow apng
 
 Requires Python 3.x.

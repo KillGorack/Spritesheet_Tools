@@ -1,0 +1,18 @@
+{
+  "last_dir": "/home/dave/Documents/Blender/renders/coins/asset_org/coin_bling",
+  "FRAME_SIZE": 128,
+  "START_INDEX": 0,
+  "DELAY_MS": 70,
+  "TARGET_SIZES": [
+    256,
+    128,
+    64,
+    32,
+    16
+  ],
+  "BASE_FRAME_SIZE": 512,
+  "RESAMPLE": "LANCZOS",
+  "DIRECTION": "down",
+  "DELETE_ORIGINAL": false,
+  "OVERWRITE": false
+}

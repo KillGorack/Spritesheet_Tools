@@ -21,17 +21,14 @@ class spritetools:
         self.DIRECTION = "down"
         self.DELETE_ORIGINAL = False
         self.OVERWRITE = False
-        
-        # Config file for last-used directory
         self.config_path = os.path.join(os.path.dirname(__file__), ".spritetools_config.json")
+        self.last_dir = '.'
         self.last_dir = self.load_config()
-
         self.root = tk.Tk()
         self.root.geometry("800x600")
         self.root.resizable(False, False)
         self.root.title("Sprite tools")
         self.root.protocol("WM_DELETE_WINDOW", self.windowXCloser)
-        # Try to set window icon (expects icon.png at project root)
         try:
             icon_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'icon.png'))
             if os.path.exists(icon_path):
@@ -39,7 +36,6 @@ class spritetools:
                 self.root.iconphoto(True, icon)
         except Exception:
             pass
-
         self.button_texts = [
             "Apng from Atlas", 
             "Apng from frames", 
@@ -50,33 +46,113 @@ class spritetools:
             "Frame stitcher (vertical)", 
             "BMP to PNG convert"
         ]
-
         self.create_grid()
-
         self.root.mainloop()
+
+
+
+
 
     def windowXCloser(self):
         self.root.destroy()
 
     def load_config(self):
-        """Load last-used directory from config file."""
+        """Load settings from config file and apply to instance.
+
+        Returns the last directory (string) for compatibility with existing code.
+        """
         if os.path.exists(self.config_path):
             try:
                 with open(self.config_path, 'r') as f:
                     data = json.load(f)
-                    last_dir = data.get('last_dir', '.')
-                    return last_dir if os.path.isdir(last_dir) else '.'
+                # last_dir first for dialogs
+                self.last_dir = data.get('last_dir', self.last_dir)
+                if not os.path.isdir(self.last_dir):
+                    self.last_dir = '.'
+
+                # Primitive settings
+                self.FRAME_SIZE = int(data.get('FRAME_SIZE', self.FRAME_SIZE))
+                self.START_INDEX = int(data.get('START_INDEX', self.START_INDEX))
+                self.DELAY_MS = int(data.get('DELAY_MS', self.DELAY_MS))
+                self.TARGET_SIZES = list(data.get('TARGET_SIZES', self.TARGET_SIZES))
+                self.BASE_FRAME_SIZE = int(data.get('BASE_FRAME_SIZE', self.BASE_FRAME_SIZE))
+
+                # Resample (stored as name)
+                resample_name = data.get('RESAMPLE', self._resample_to_name(self.RESAMPLE))
+                self.RESAMPLE = self._resample_from_name(resample_name)
+
+                self.DIRECTION = data.get('DIRECTION', self.DIRECTION)
+                self.DELETE_ORIGINAL = bool(data.get('DELETE_ORIGINAL', self.DELETE_ORIGINAL))
+                self.OVERWRITE = bool(data.get('OVERWRITE', self.OVERWRITE))
+
+                return self.last_dir
             except Exception:
-                return '.'
-        return '.'
+                return self.last_dir
+        return self.last_dir
 
     def save_config(self):
-        """Save last-used directory to config file."""
+        """Save settings to config file."""
         try:
+            data = {
+                'last_dir': self.last_dir,
+                'FRAME_SIZE': self.FRAME_SIZE,
+                'START_INDEX': self.START_INDEX,
+                'DELAY_MS': self.DELAY_MS,
+                'TARGET_SIZES': self.TARGET_SIZES,
+                'BASE_FRAME_SIZE': self.BASE_FRAME_SIZE,
+                'RESAMPLE': self._resample_to_name(self.RESAMPLE),
+                'DIRECTION': self.DIRECTION,
+                'DELETE_ORIGINAL': self.DELETE_ORIGINAL,
+                'OVERWRITE': self.OVERWRITE
+            }
             with open(self.config_path, 'w') as f:
-                json.dump({'last_dir': self.last_dir}, f)
+                json.dump(data, f, indent=2)
         except Exception as e:
             self.log_message(f"Warning: Could not save config: {e}")
+
+
+
+
+
+
+    def _resample_from_name(self, name):
+        if not name:
+            if hasattr(Image, 'Resampling'):
+                return Image.Resampling.LANCZOS
+            return getattr(Image, 'LANCZOS', Image.BICUBIC)
+        try:
+            if hasattr(Image, 'Resampling'):
+                return Image.Resampling[name]
+        except Exception:
+            pass
+        return getattr(Image, name, getattr(Image, 'LANCZOS', Image.BICUBIC))
+
+
+
+
+
+
+
+    def _resample_to_name(self, resample):
+        try:
+            return resample.name
+        except Exception:
+            # try matching against known names
+            for n in ['NEAREST', 'BOX', 'BILINEAR', 'HAMMING', 'BICUBIC', 'LANCZOS']:
+                try:
+                    if hasattr(Image, 'Resampling'):
+                        val = Image.Resampling[n]
+                    else:
+                        val = getattr(Image, n)
+                except Exception:
+                    val = None
+                if val == resample:
+                    return n
+            return 'LANCZOS'
+        
+
+
+
 
     def log_message(self, message):
         """Append a message to the text log widget."""
@@ -134,6 +210,8 @@ class spritetools:
                 self.save_config()
             return path if path else None
         
+
+
 
     def select_folder(self):
         folder = filedialog.askdirectory(parent=self.root, title="Select folder", initialdir=self.last_dir)

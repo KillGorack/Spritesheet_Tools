@@ -26,14 +26,6 @@ pip install pillow apng
 
 Requires Python 3.x.
 
-
-## Typical Project Structure
-
-Spritesheet_Tools/
-├── sprite_sheet_tools.py
-├── icon.png
-└── .spritetools_config.json
-
 ## License
 
 MIT, do whatever you want.. no biggie.. Not responsible for any damage or data loss.

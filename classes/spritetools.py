@@ -25,7 +25,7 @@ class spritetools:
         self.last_dir = '.'
         self.last_dir = self.load_config()
         self.root = tk.Tk()
-        self.root.geometry("800x600")
+        self.root.geometry("800x400")
         self.root.resizable(False, False)
         self.root.title("Sprite tools")
         self.root.protocol("WM_DELETE_WINDOW", self.windowXCloser)
@@ -56,42 +56,38 @@ class spritetools:
     def windowXCloser(self):
         self.root.destroy()
 
-    def load_config(self):
-        """Load settings from config file and apply to instance.
 
-        Returns the last directory (string) for compatibility with existing code.
-        """
+
+
+
+    def load_config(self):
         if os.path.exists(self.config_path):
             try:
                 with open(self.config_path, 'r') as f:
                     data = json.load(f)
-                # last_dir first for dialogs
                 self.last_dir = data.get('last_dir', self.last_dir)
                 if not os.path.isdir(self.last_dir):
                     self.last_dir = '.'
-
-                # Primitive settings
                 self.FRAME_SIZE = int(data.get('FRAME_SIZE', self.FRAME_SIZE))
                 self.START_INDEX = int(data.get('START_INDEX', self.START_INDEX))
                 self.DELAY_MS = int(data.get('DELAY_MS', self.DELAY_MS))
                 self.TARGET_SIZES = list(data.get('TARGET_SIZES', self.TARGET_SIZES))
                 self.BASE_FRAME_SIZE = int(data.get('BASE_FRAME_SIZE', self.BASE_FRAME_SIZE))
-
-                # Resample (stored as name)
                 resample_name = data.get('RESAMPLE', self._resample_to_name(self.RESAMPLE))
                 self.RESAMPLE = self._resample_from_name(resample_name)
-
                 self.DIRECTION = data.get('DIRECTION', self.DIRECTION)
                 self.DELETE_ORIGINAL = bool(data.get('DELETE_ORIGINAL', self.DELETE_ORIGINAL))
                 self.OVERWRITE = bool(data.get('OVERWRITE', self.OVERWRITE))
-
                 return self.last_dir
             except Exception:
                 return self.last_dir
         return self.last_dir
 
+
+
+
+
     def save_config(self):
-        """Save settings to config file."""
         try:
             data = {
                 'last_dir': self.last_dir,
@@ -137,7 +133,6 @@ class spritetools:
         try:
             return resample.name
         except Exception:
-            # try matching against known names
             for n in ['NEAREST', 'BOX', 'BILINEAR', 'HAMMING', 'BICUBIC', 'LANCZOS']:
                 try:
                     if hasattr(Image, 'Resampling'):
@@ -155,10 +150,12 @@ class spritetools:
 
 
     def log_message(self, message):
-        """Append a message to the text log widget."""
         self.log_text.insert(tk.END, message + "\n")
         self.log_text.see(tk.END)
         self.root.update()
+
+
+
 
     def create_grid(self):
         button_actions = [
@@ -180,9 +177,7 @@ class spritetools:
             self.root.grid_columnconfigure(i, weight=1)
         for i in range(4):
             self.root.grid_rowconfigure(i, weight=1)
-        
-        # Add text log widget at the bottom
-        self.log_text = tk.Text(self.root, height=8, width=100, bg="#f0f0f0", fg="#333")
+        self.log_text = tk.Text(self.root, height=8, width=100, bg="#f0f0f0", fg="#333", font=("Consolas", 8))
         self.log_text.grid(row=4, column=0, columnspan=2, padx=5, pady=5, sticky="nsew")
         self.root.grid_rowconfigure(4, weight=1)
 

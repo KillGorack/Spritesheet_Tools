@@ -39,7 +39,8 @@ Built with Python, Tkinter, Pillow, and apng, this tool provides fast utilities 
   The tool does not attempt to normalize or resize mismatched frames.
 
 - **BMP → PNG Converter** — A simple utility added mainly for convenience after moving from Windows to Linux. If i needed more I would have built this a little more procedural. (maybe later)
-
+  
+<img width="810" height="438" alt="Screenshot_20260322_104348" src="https://github.com/user-attachments/assets/411c57b5-30bc-4b48-b331-d616914a5d77" />
 
 ## Requirements
 Install dependencies:

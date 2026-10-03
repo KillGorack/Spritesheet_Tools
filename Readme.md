@@ -16,6 +16,12 @@ Built with Python, [CustomTkinter](https://github.com/TomSchimansky/CustomTkinte
 - **Orthogonal resizer** — Rescales a spritesheet built from 512 px frames into several target resolutions (256, 128, 64, 32, 16 by default).
 - **Frame stitcher** — Combines multiple frames into a single tilesheet: a horizontal strip, a vertical strip, or a grid with a set number of columns (or automatically about square).
 
+### Tilesets
+- **Tileset maker** — Builds an autotile tileset from a **border image** and a **fill tile** of the same size (ported from TileMapCreator).
+  - The border image is cut at **Border size** pixels from each edge. A 3×3 cut (9-slice) gives all 47 tiles of a "blob" set in a 12 × 4 sheet (the last cell is empty); a border of exactly half the image (4-block) gives 16 tiles in a 4 × 4 sheet. Each tile is the fill tile with some of the border pieces drawn over it.
+  - The border image is shown with red guide lines where it's cut: drag one to change the border size. The tileset updates as you go; hover a tile to see which pieces it uses.
+  - **Save tileset** writes `<border image>_tileset.png` next to the border image.
+
 ### Tools
 - **Image converter** — Batch converts selected files, or a whole folder (optionally including subfolders), between common game asset formats.
   - Reads any image format your Pillow install can open (PNG, BMP, TGA, JPG, WEBP, GIF, TIFF, DDS, PSD, QOI, ICO, PCX and more). With a folder, non-image files are skipped automatically.
@@ -85,11 +91,13 @@ Settings are stored in `~/.config/spritetools/config.json`, or `$XDG_CONFIG_HOME
     spritetools/
       config.py              settings: defaults, load, save
       ops/                   the image processing (no GUI code)
-        alpha.py, apng.py, atlas.py, convert.py, frames.py, util.py
+        alpha.py, apng.py, atlas.py, convert.py, frames.py, tileset.py, util.py
       ui/
         app.py               main window: sidebar, toolbar, tool panel, log
         tools.py             the tools: description, input, settings, how to run
         player.py            the animation preview player
+        tileset_view.py      the tileset maker's border and tileset view
+        imaging.py           showing images on canvases (scaling, checkerboard)
         theme.py             colors and icons
         filedialogs.py       desktop file pickers
         worker.py            runs tools in the background

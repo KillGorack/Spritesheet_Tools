@@ -1,18 +1,9 @@
-import io
-import math
 import tkinter as tk
 
 import customtkinter as ctk
 from PIL import Image
 
-CHECKER_PX = 8
-
-
-def to_photo(img):
-    """Tk image of an RGB PIL image (PPM data: fast, and needs no PIL.ImageTk)."""
-    buf = io.BytesIO()
-    img.save(buf, "PPM")
-    return tk.PhotoImage(data=buf.getvalue())
+from .imaging import checkerboard, fit_scale, scaled, to_photo
 
 
 class Player(ctk.CTkFrame):
@@ -146,12 +137,8 @@ class Player(ctk.CTkFrame):
     def scale(self):
         """Display scale: zoom (shrunk if it doesn't fit), or for fit the largest whole
         number that fits (sharp pixels), or below 1 if even 1x doesn't fit."""
-        fw = max(f.width for f in self.frames)
-        fh = max(f.height for f in self.frames)
-        room = min(self.canvas.winfo_width() / fw, self.canvas.winfo_height() / fh)
-        if self.zoom:
-            return min(self.zoom, room)
-        return math.floor(room) if room >= 1 else room
+        size = (max(f.width for f in self.frames), max(f.height for f in self.frames))
+        return fit_scale(size, (self.canvas.winfo_width(), self.canvas.winfo_height()), self.zoom)
 
     def redraw(self, clear=False):
         if clear:
@@ -168,12 +155,8 @@ class Player(ctk.CTkFrame):
         self.counter.configure(text=f"Frame {index + 1} / {len(self.frames)}")
 
     def _render(self, frame):
-        scale = self.scale()
-        size = (max(1, round(frame.width * scale)), max(1, round(frame.height * scale)))
-        if size != frame.size:
-            sharp = scale >= 1 and scale == int(scale)
-            frame = frame.resize(size, Image.Resampling.NEAREST if sharp else Image.Resampling.LANCZOS)
-        backdrop = self._backdrop(size)
+        frame = scaled(frame, self.scale())
+        backdrop = self._backdrop(frame.size)
         backdrop.alpha_composite(frame)
         return to_photo(backdrop.convert("RGB"))
 
@@ -189,14 +172,5 @@ class Player(ctk.CTkFrame):
             return Image.new("RGBA", size, (30, 30, 30, 255))
         if self.background == "light":
             return Image.new("RGBA", size, (230, 230, 230, 255))
-        # checkerboard in two shades of the theme, the usual "this is transparent" pattern
-        light, dark = t.get("list_hover", "#333333"), t.get("surface", "#171717")
-        small = Image.new("RGBA", (math.ceil(size[0] / CHECKER_PX), math.ceil(size[1] / CHECKER_PX)), dark)
-        px = small.load()
-        light_rgb = Image.new("RGBA", (1, 1), light).getpixel((0, 0))
-        for y in range(small.height):
-            for x in range(small.width):
-                if (x + y) % 2:
-                    px[x, y] = light_rgb
-        return small.resize((small.width * CHECKER_PX, small.height * CHECKER_PX),
-                            Image.Resampling.NEAREST).crop((0, 0) + size)
+        # checkerboard in two shades of the theme
+        return checkerboard(size, t.get("list_hover", "#333333"), t.get("surface", "#171717"))

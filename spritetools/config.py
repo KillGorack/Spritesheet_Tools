@@ -34,6 +34,7 @@ class Config:
     apng_mode: str = "row"
     preview_row: int = 1
     preview_zoom: int = 0
+    border_size: int = 16
     preview_background: str = "checker"
     halo_overwrite: bool = False
     theme: str = "dark"

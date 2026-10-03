@@ -12,7 +12,7 @@ from typing import Callable
 
 from PIL import Image
 
-from ..ops import alpha, apng, atlas, convert, frames
+from ..ops import alpha, apng, atlas, convert, frames, tileset
 
 
 @dataclass(eq=False)  # compared by identity, so options can be dict keys
@@ -61,14 +61,28 @@ class Option:
 
 
 @dataclass
+class Slot:
+    """One input of a tool: a label and the ways to choose it (keys of the app's INPUT_BUTTONS)."""
+    key: str
+    label: str
+    modes: list
+
+
+INPUT_MODES = {"file": ["file"], "files": ["files"], "files_or_folder": ["files", "folder"],
+               "frames_or_sheet": ["frames", "sheet"]}
+
+
+@dataclass
 class Tool:
     key: str
     name: str
     category: str
     description: str
-    inputs: str          # "file", "files", "files_or_folder" or "frames_or_sheet"
+    inputs: str          # a key of INPUT_MODES, or "slots" for several inputs (see slots)
     options: list
-    run: Callable        # run(config, paths, log) -> result; runs in the background
+    # run(config, paths, log) -> result; runs in the background. With slots, paths is
+    # {slot key: paths} instead of a list.
+    run: Callable
     done: Callable       # done(result, paths) -> (note for the toolbar, output folder)
     run_label: str = "Run"
     preview: bool = False   # run returns frames, which play in the preview instead of the log
@@ -77,6 +91,15 @@ class Tool:
     save_label: str = "Save"
     input_info: Callable = None  # input_info(config, paths) -> line shown under the input, or None
     prepare: Callable = None     # prepare(config, paths) after an input is chosen, e.g. to guess settings
+    slots: list = None           # several inputs, e.g. a border image and a fill tile
+    view: str = None             # what replaces the log: "player" (see preview), "tileset", or None
+    render: Callable = None      # render(config, paths) -> data for the view; quick, on the main thread
+
+    def input_slots(self):
+        return self.slots or [Slot("input", "Input", INPUT_MODES[self.inputs])]
+
+    def view_name(self):
+        return self.view or ("player" if self.preview else "log")
 
     def search_text(self):
         """Everything the sidebar search looks in: name, category, description, settings."""
@@ -129,6 +152,47 @@ def _guess_sheet_layout(cfg, paths):
         cfg.sheet_columns, cfg.sheet_rows = guess
         if cfg.preview_row > cfg.sheet_rows:
             cfg.preview_row = 1
+
+
+_image_cache = {}  # path -> (modification time, RGBA image), so dragging a guide doesn't reread files
+
+
+def _image(path):
+    mtime = os.path.getmtime(path)
+    cached = _image_cache.get(path)
+    if not cached or cached[0] != mtime:
+        with Image.open(path) as img:
+            _image_cache[path] = (mtime, img.convert("RGBA"))
+    return _image_cache[path][1]
+
+
+def _render_tileset(cfg, paths):
+    """What the tileset view shows: the border image, and the tileset or why there isn't one."""
+    border = _image(paths["border"][0]) if paths.get("border") else None
+    fill = _image(paths["fill"][0]) if paths.get("fill") else None
+    data = {"border": border, "border_size": cfg.border_size, "result": None, "layout": None, "message": None}
+    try:
+        if border and fill:
+            data["result"], data["layout"] = tileset.build(border, fill, cfg.border_size)
+        elif border:
+            tileset.mode_for(*border.size, cfg.border_size)
+            data["message"] = "Choose a fill tile to see the tileset"
+        else:
+            data["message"] = "Choose a border image and a fill tile"
+    except ValueError as e:
+        data["message"] = str(e)[0].upper() + str(e)[1:]
+    return data
+
+
+def _tileset_info(cfg, paths):
+    if not paths.get("border"):
+        return None
+    border = _image(paths["border"][0])
+    fill = _image(paths["fill"][0]).size if paths.get("fill") else None
+    try:
+        return tileset.describe(cfg.border_size, border.size, fill)
+    except ValueError:
+        return None  # the view says what's wrong
 
 
 def _folder_of(path):
@@ -212,6 +276,19 @@ TOOLS = [
         run=lambda cfg, paths, log: atlas.stitch(paths, cfg.stitch_direction, cfg.stitch_columns,
                                                  cfg.fix_halos, log=log),
         done=lambda out, paths: (f"Saved {os.path.basename(out)}", os.path.dirname(out)),
+    ),
+    Tool(
+        "tileset", "Tileset maker", "Tilesets",
+        "Builds an autotile tileset from a border image and a fill tile of the same size. The border image "
+        "is cut at the border size from each edge: a 3x3 cut makes all 47 tiles (12 × 4), and a border of "
+        "exactly half the image makes 16 (4 × 4). Saved as <border image>_tileset.png next to it.",
+        "slots", [Option("border_size", "Border size (px)", "int"), FIX_HALOS],
+        run=lambda cfg, paths, log: tileset.make_tileset(paths["border"][0], paths["fill"][0], cfg.border_size,
+                                                         cfg.fix_halos, log=log),
+        done=lambda out, paths: (f"Saved {os.path.basename(out)}", os.path.dirname(out)),
+        run_label="Save tileset",
+        slots=[Slot("border", "Border image", ["file"]), Slot("fill", "Fill tile", ["file"])],
+        view="tileset", render=_render_tileset, input_info=_tileset_info,
     ),
     Tool(
         "convert", "Image converter", "Tools",

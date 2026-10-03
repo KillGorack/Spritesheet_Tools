@@ -13,6 +13,7 @@ from ..ops.convert import readable_extensions
 from . import filedialogs
 from .theme import FONT, HEADING_FONT, LOG_FONT, THEMES, TITLE_FONT, load_icon
 from .player import Player
+from .tileset_view import TilesetView
 from .tools import TOOLS, TOOLS_BY_KEY
 from .worker import Worker
 
@@ -42,11 +43,12 @@ class App(ctk.CTk):
         self.tool = TOOLS_BY_KEY.get(self.config_data.last_tool, TOOLS[0])
         patterns = ["*" + ext for ext in readable_extensions()]
         self.patterns = patterns + [p.upper() for p in patterns]
-        self.inputs = {}       # tool key -> chosen paths (a folder is a one-item list)
+        self.inputs = {}       # tool key -> {slot key: chosen paths} (a folder is a one-item list)
         self.output_dirs = {}  # tool key -> folder its last run wrote to
         self.fields = {}       # option -> (variable, widget) for the panel on show
         self.running = None    # (tool key, "run" or "save") of the task that's running
         self.reload_job = None
+        self.view_job = None
         self.dialog_open = False
         self.close_armed = False
         self.note = self.note_job = None
@@ -86,10 +88,13 @@ class App(ctk.CTk):
         self.log_box = ctk.CTkTextbox(self, wrap="word", state="disabled", font=LOG_FONT)
         self.log_box.grid(row=2, column=1, sticky="nsew", padx=10, pady=(0, 10))
         self.log_box._textbox.configure(padx=8, pady=6)
-        # takes the log's place while the preview tool is open
+        # views that take the log's place for some tools (Tool.view_name)
         self.player = Player(self)
-        self.player.grid(row=2, column=1, sticky="nsew", padx=10, pady=(0, 10))
-        self.player.grid_remove()
+        self.tileset_view = TilesetView(self, on_border_size=self.set_border_size)
+        self.views = {"log": self.log_box, "player": self.player, "tileset": self.tileset_view}
+        for view in (self.player, self.tileset_view):
+            view.grid(row=2, column=1, sticky="nsew", padx=10, pady=(0, 10))
+            view.grid_remove()
 
         # sidebar: search and the tool list
         self.sidebar = ctk.CTkFrame(self, width=230, corner_radius=0, fg_color="transparent")
@@ -116,7 +121,7 @@ class App(ctk.CTk):
 
         self.bind("<Control-b>", lambda e: self.toggle_sidebar())
         self.bind("<Control-f>", lambda e: self.focus_search())
-        self.bind("<Control-o>", lambda e: self.choose_input(self.input_modes()[0]))
+        self.bind("<Control-o>", lambda e: self.choose_input(self.tool.input_slots()[0].modes[0]))
         self.bind("<Control-Return>", lambda e: self.run_tool("save" if self.tool.save else "run"))
         self.bind("<space>", lambda e: self.player_key(self.player.toggle))
         self.bind("<Left>", lambda e: self.player_key(lambda: self.player.step(-1)))
@@ -211,6 +216,7 @@ class App(ctk.CTk):
                 self._icons[name] = load_icon(name, t["text"], size)
                 btn.configure(image=self._icons[name], fg_color="transparent", hover_color=t["list_hover"])
         self.player.apply_theme(t)
+        self.tileset_view.apply_theme(t)
         self.update_status()
         self.show_tool(self.tool.key)
 
@@ -292,20 +298,29 @@ class App(ctk.CTk):
             self.save_config()
         self.title_label.configure(text=self.tool.name)
         self.build_panel()
-        if self.tool.preview:
-            self.log_box.grid_remove()
-            self.player.grid()
+        shown = self.tool.view_name()
+        for name, view in self.views.items():
+            if name == shown:
+                view.grid()
+            else:
+                view.grid_remove()
+        if shown == "player":
             self.sync_player()
             self.player.play()
         else:
             self.player.pause()
-            self.player.grid_remove()
-            self.log_box.grid()
+        self.refresh_view()
         self.refresh_list()
 
-    def input_modes(self):
-        return {"file": ["file"], "files": ["files"], "files_or_folder": ["files", "folder"],
-                "frames_or_sheet": ["frames", "sheet"]}[self.tool.inputs]
+    def tool_inputs(self, tool=None):
+        """{slot key: paths} chosen for a tool."""
+        return self.inputs.setdefault((tool or self.tool).key, {})
+
+    def tool_args(self, tool=None):
+        """What a tool's run, input_info and prepare get: the paths, or {slot key: paths} with slots."""
+        tool = tool or self.tool
+        chosen = self.tool_inputs(tool)
+        return dict(chosen) if tool.slots else chosen.get("input")
 
     def build_panel(self):
         for w in self.panel.winfo_children():
@@ -319,22 +334,27 @@ class App(ctk.CTk):
         self.description.grid(row=0, column=0, columnspan=6, sticky="ew", padx=pad, pady=(12, 10))
         self.wrap_description()
 
-        # its own row, so the path can use whatever width the settings below leave
-        input_row = ctk.CTkFrame(self.panel, fg_color="transparent")
-        input_row.grid(row=1, column=0, columnspan=6, sticky="ew", padx=pad, pady=4)
-        input_row.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(input_row, text="Input", text_color=t["text"], anchor="w").grid(
-            row=0, column=0, sticky="w", padx=(0, 16))
-        self.input_label = ctk.CTkLabel(input_row, text="", anchor="w")
-        self.input_label.grid(row=0, column=1, sticky="ew")
-        self.input_label.bind("<Configure>", lambda e: self.fit_input_label())
-        for i, mode in enumerate(self.input_modes()):
-            ctk.CTkButton(input_row, text=INPUT_BUTTONS[mode][0], width=120,
-                          command=lambda m=mode: self.choose_input(m),
-                          **self.button_style()).grid(row=0, column=2 + i, padx=(6, 0))
+        # inputs get their own grid, so paths can use whatever width the settings below leave
+        input_rows = ctk.CTkFrame(self.panel, fg_color="transparent")
+        input_rows.grid(row=1, column=0, columnspan=6, sticky="ew", padx=pad, pady=4)
+        input_rows.grid_columnconfigure(1, weight=1)
+        self.input_labels = {}
+        slots = tool.input_slots()
+        for r, slot in enumerate(slots):
+            top = 0 if r == 0 else 6
+            ctk.CTkLabel(input_rows, text=slot.label, text_color=t["text"], anchor="w").grid(
+                row=r, column=0, sticky="w", padx=(0, 16), pady=(top, 0))
+            label = ctk.CTkLabel(input_rows, text="", anchor="w")
+            label.grid(row=r, column=1, sticky="ew", pady=(top, 0))
+            label.bind("<Configure>", lambda e, k=slot.key: self.fit_input_label(k))
+            self.input_labels[slot.key] = label
+            for i, mode in enumerate(slot.modes):
+                ctk.CTkButton(input_rows, text=INPUT_BUTTONS[mode][0], width=120,
+                              command=lambda m=mode, k=slot.key: self.choose_input(m, k),
+                              **self.button_style()).grid(row=r, column=2 + i, padx=(6, 0), pady=(top, 0))
         # e.g. how a sheet is cut into frames; hidden when the tool has nothing to say
-        self.input_info = ctk.CTkLabel(input_row, text="", anchor="w", text_color=t["muted"])
-        self.input_info.grid(row=1, column=1, columnspan=3, sticky="w")
+        self.input_info = ctk.CTkLabel(input_rows, text="", anchor="w", text_color=t["muted"])
+        self.input_info.grid(row=len(slots), column=1, columnspan=3, sticky="w")
         self.update_input_label()
 
         self.field_labels = {}
@@ -376,6 +396,8 @@ class App(ctk.CTk):
         for option, (var, widget) in self.fields.items():
             if tool.input_info:
                 var.trace_add("write", lambda *_: self.update_input_info())
+            if tool.render:
+                var.trace_add("write", lambda *_: self.schedule_view_refresh())
             if tool.preview:  # playback settings apply while it plays; what to load, after a pause in typing
                 if option.key in RELOAD_SETTINGS:
                     var.trace_add("write", lambda *_: self.schedule_reload())
@@ -405,11 +427,10 @@ class App(ctk.CTk):
             self.description.configure(wraplength=max(300, int(width) - 40))
 
     def update_input_info(self):
-        paths = self.inputs.get(self.tool.key)
         text = None
-        if self.tool.input_info and paths:
+        if self.tool.input_info and any(self.tool_inputs().values()):
             try:
-                text = self.tool.input_info(self.current_settings(), paths)
+                text = self.tool.input_info(self.current_settings(), self.tool_args())
             except (OSError, ValueError) as e:
                 text = f"Can't read the input: {e}"
         if text:
@@ -418,8 +439,8 @@ class App(ctk.CTk):
         else:
             self.input_info.grid_remove()
 
-    def input_text(self):
-        paths = self.inputs.get(self.tool.key)
+    def input_text(self, slot_key):
+        paths = self.tool_inputs().get(slot_key)
         if not paths:
             return "Nothing chosen yet"
         if len(paths) == 1:
@@ -431,16 +452,17 @@ class App(ctk.CTk):
         return f"{len(paths)} files in {short_path(os.path.dirname(paths[0]))}"
 
     def update_input_label(self):
-        has_input = bool(self.inputs.get(self.tool.key))
-        self.input_label.configure(text_color=self.t["text"] if has_input else self.t["muted"])
-        self.fit_input_label()
+        for key, label in self.input_labels.items():
+            has_input = bool(self.tool_inputs().get(key))
+            label.configure(text_color=self.t["text"] if has_input else self.t["muted"])
+            self.fit_input_label(key)
 
-    def fit_input_label(self):
+    def fit_input_label(self, slot_key):
         """Show the input, with "…" in the middle if it doesn't fit (the file name at the end stays)."""
-        label = self.input_label
-        if not label.winfo_exists():
+        label = self.input_labels.get(slot_key)
+        if not label or not label.winfo_exists():
             return
-        full = self.input_text()
+        full = self.input_text(slot_key)
         room = label.winfo_width()
         font = label.cget("font")
         text = full
@@ -482,20 +504,23 @@ class App(ctk.CTk):
         last = self.config_data.last_dir
         return last if last != "." and os.path.isdir(last) else str(Path.home())
 
-    def choose_input(self, mode):
+    def choose_input(self, mode, slot_key=None):
         if self.dialog_open:
             return
+        slot_key = slot_key or self.tool.input_slots()[0].key
         self.dialog_open = True
         tool = self.tool
         titles = {"file": "Choose an image", "files": "Choose images", "folder": "Choose a folder",
                   "frames": "Choose the frames", "sheet": "Choose a spritesheet"}
+        if tool.slots:
+            titles["file"] = f"Choose the {next(s.label for s in tool.slots if s.key == slot_key).lower()}"
         dialog_mode = INPUT_BUTTONS[mode][1]
 
         def then(paths):
             self.dialog_open = False
             if not paths:
                 return
-            self.inputs[tool.key] = sorted(paths)
+            self.tool_inputs(tool)[slot_key] = sorted(paths)
             self.config_data.last_dir = paths[0] if mode == "folder" else os.path.dirname(paths[0])
             if self.tool is not tool:
                 self.save_config()
@@ -505,12 +530,13 @@ class App(ctk.CTk):
                 self.config_data.apng_source = mode
             if tool.prepare:
                 try:
-                    tool.prepare(self.config_data, self.inputs[tool.key])
+                    tool.prepare(self.config_data, self.tool_args(tool))
                 except (OSError, ValueError) as e:
                     self.show_note(f"Can't read the input: {e}", 5000, error=True)
                     return
             self.save_config()
             self.build_panel()
+            self.refresh_view()
             if tool.preview:
                 self.run_tool()
 
@@ -528,11 +554,13 @@ class App(ctk.CTk):
         if errors:
             self.show_note(errors[0], 4000, error=True)
             return
-        paths = self.inputs.get(tool.key)
-        if not paths:
-            self.show_note("Choose an input first", error=True)
-            return
-        missing = [p for p in paths if not os.path.exists(p)]
+        chosen = self.tool_inputs(tool)
+        for slot in tool.input_slots():
+            if not chosen.get(slot.key):
+                what = "an input" if not tool.slots else f"the {slot.label.lower()}"
+                self.show_note(f"Choose {what} first", error=True)
+                return
+        missing = [p for paths in chosen.values() for p in paths if not os.path.exists(p)]
         if missing:
             self.show_note(f"Not found: {os.path.basename(missing[0])}", error=True)
             return
@@ -540,6 +568,8 @@ class App(ctk.CTk):
         self.running = (tool.key, action)
         self.update_actions()
         self.log(f"── {tool.name} ──")
+
+        paths = self.tool_args(tool)
 
         def done(result):
             if tool.preview and action == "run":
@@ -558,7 +588,7 @@ class App(ctk.CTk):
             self.show_note(message if len(message) <= 90 else message[:89] + "…", 6000, error=True)
 
         # a copy, so changing settings while it runs doesn't affect it
-        self.worker.run(fn, copy.deepcopy(self.config_data), list(paths), on_done=done, on_error=failed)
+        self.worker.run(fn, copy.deepcopy(self.config_data), copy.deepcopy(paths), on_done=done, on_error=failed)
 
     def schedule_reload(self):
         """Reload the preview half a second after the frame size or row stops changing."""
@@ -568,7 +598,7 @@ class App(ctk.CTk):
 
     def auto_reload(self):
         self.reload_job = None
-        paths = self.inputs.get(self.tool.key)
+        paths = self.tool_inputs().get("input")
         # only a sheet uses these settings; and don't complain about a half-typed number
         if not self.tool.preview or self.running or not paths or self.config_data.apng_source != "sheet":
             return
@@ -579,6 +609,28 @@ class App(ctk.CTk):
                 except (ValueError, tk.TclError):
                     return
         self.run_tool()
+
+    def schedule_view_refresh(self):
+        """Redraw the tool's view soon; several setting changes in a row (e.g. dragging) redraw once."""
+        if not self.view_job:
+            self.view_job = self.after(30, self.refresh_view)
+
+    def refresh_view(self):
+        self.view_job = None
+        tool = self.tool
+        if not tool.render:
+            return
+        try:
+            data = tool.render(self.current_settings(), self.tool_args())
+        except OSError as e:
+            data = {"message": f"Can't read the input: {e}"}
+        self.views[tool.view_name()].show(data)
+
+    def set_border_size(self, size):
+        """The tileset view's guides were dragged: put the new size in the Border size field."""
+        for option, (var, widget) in self.fields.items():
+            if option.key == "border_size":
+                var.set(str(size))
 
     def sync_player(self):
         """Pass the panel's playback settings to the player (invalid ones are ignored)."""

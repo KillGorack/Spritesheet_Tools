@@ -12,7 +12,7 @@ from typing import Callable
 
 from PIL import Image
 
-from ..ops import alpha, apng, atlas, convert, frames, tileset
+from ..ops import alpha, apng, atlas, convert, frames, recolor, tileset
 
 
 @dataclass(eq=False)  # compared by identity, so options can be dict keys
@@ -20,11 +20,12 @@ class Option:
     """One setting shown in a tool's panel, stored in the Config field `key`."""
     key: str
     label: str
-    kind: str                                    # "int", "int_list", "bool" or "choice"
+    kind: str                                    # "int", "int_list", "bool", "choice", "slider" or "text"
     choices: dict = field(default_factory=dict)  # choice: label shown -> value stored
     minimum: int = 1
     maximum: int = None
     enabled_when: dict = None                    # {setting: values} it only applies with
+    hue: bool = False                            # slider: its value is a hue, shown as a color
 
     def parse(self, raw):
         """Value to store from what's in the widget. Raises ValueError with a message for the user."""
@@ -32,6 +33,13 @@ class Option:
             return bool(raw)
         if self.kind == "choice":
             return self.choices[raw]
+        if self.kind == "slider":
+            return max(self.minimum, min(self.maximum, round(float(raw))))
+        if self.kind == "text":
+            text = str(raw).strip()
+            if not text or any(c in text for c in '/\\:*?"<>|') or text in (".", ".."):
+                raise ValueError(f"{self.label}: enter a folder name (no slashes)")
+            return text
         if self.kind == "int":
             return self._check(raw)
         numbers = [self._check(part) for part in str(raw).replace(",", " ").split()]
@@ -45,7 +53,7 @@ class Option:
             return next((label for label, v in self.choices.items() if v == value), next(iter(self.choices)))
         if self.kind == "int_list":
             return ", ".join(str(v) for v in value)
-        if self.kind == "int":
+        if self.kind in ("int", "text"):
             return str(value)
         return value
 
@@ -92,7 +100,7 @@ class Tool:
     input_info: Callable = None  # input_info(config, paths) -> line shown under the input, or None
     prepare: Callable = None     # prepare(config, paths) after an input is chosen, e.g. to guess settings
     slots: list = None           # several inputs, e.g. a border image and a fill tile
-    view: str = None             # what replaces the log: "player" (see preview), "tileset", or None
+    view: str = None             # what replaces the log: "player" (see preview), "tileset", "recolor" or None
     render: Callable = None      # render(config, paths) -> data for the view; quick, on the main thread
 
     def input_slots(self):
@@ -126,6 +134,7 @@ RESAMPLE_CHOICES = {
 
 
 SHEET = {"apng_source": ("sheet",)}
+RECOLOR_SHIFT = {"recolor_mode": ("shift",)}
 
 
 def _layout(cfg):
@@ -193,6 +202,45 @@ def _tileset_info(cfg, paths):
         return tileset.describe(cfg.border_size, border.size, fill)
     except ValueError:
         return None  # the view says what's wrong
+
+
+PREVIEW_PX = 512       # the recolor preview is shrunk to fit this, so sliders respond quickly
+PALETTE_PIXELS = 8_000_000  # the swatches come from the first images up to this many pixels, to stay quick
+_palette_cache = {}    # (paths and modification times) -> palette of all of them
+
+
+def _recolor_inputs(cfg, paths):
+    return _expand_folder(paths, cfg.convert_recursive) if paths else []
+
+
+def _render_recolor(cfg, paths):
+    """What the recolor view shows: the first image before and after, and the palette of all of them."""
+    data = {"mode": cfg.recolor_mode, "before": None, "after": None, "palette": [], "mapping": cfg.recolor_map,
+            "hue": cfg.recolor_hue, "range": cfg.recolor_range, "new_hue": cfg.recolor_new_hue, "message": None}
+    files = _recolor_inputs(cfg, paths)
+    if not files:
+        data["message"] = "No images found in that folder" if paths else "Choose images or a folder"
+        return data
+    before = _image(files[0])
+    if max(before.size) > PREVIEW_PX:  # nearest neighbor, so exact colors survive
+        scale = PREVIEW_PX / max(before.size)
+        before = before.resize((max(1, round(before.width * scale)), max(1, round(before.height * scale))),
+                               Image.Resampling.NEAREST)
+    data["before"] = before
+    data["after"] = recolor.recolor(before, cfg)
+    if cfg.recolor_mode == "swap":
+        key = tuple((p, os.path.getmtime(p)) for p in files)
+        if key not in _palette_cache:
+            images, pixels = [], 0
+            for p in files:
+                images.append(_image(p))
+                pixels += images[-1].width * images[-1].height
+                if pixels >= PALETTE_PIXELS:
+                    break
+            _palette_cache.clear()
+            _palette_cache[key] = recolor.palette(images)
+        data["palette"] = _palette_cache[key]
+    return data
 
 
 def _folder_of(path):
@@ -305,6 +353,32 @@ TOOLS = [
         run=_convert,
         done=lambda c, paths: (f"Converted {c['converted']}, skipped {c['skipped']}, failed {c['failed']}",
                                _folder_of(paths[0])),
+    ),
+    Tool(
+        "recolor", "Recolor", "Tools",
+        "Makes color variants of sprites, e.g. enemy or team colors. Shift a color range (for shaded art "
+        "like renders): click the color to change, then set the new color; shading is kept and greys are "
+        "left alone. Swap exact colors (for pixel art): click a color and choose its replacement. "
+        "Results keep their names, in a folder of your choice next to the images.",
+        "files_or_folder", [
+            Option("recolor_mode", "Mode", "choice",
+                   {"Shift a color range": "shift", "Swap exact colors": "swap"}),
+            Option("recolor_folder", "Save into folder", "text"),
+            Option("recolor_hue", "Color to change", "slider", minimum=0, maximum=359, hue=True,
+                   enabled_when=RECOLOR_SHIFT),
+            Option("recolor_new_hue", "New color", "slider", minimum=0, maximum=359, hue=True,
+                   enabled_when=RECOLOR_SHIFT),
+            Option("recolor_range", "Range (±°)", "slider", minimum=0, maximum=90, enabled_when=RECOLOR_SHIFT),
+            Option("recolor_saturation", "Saturation (%)", "slider", minimum=-100, maximum=100,
+                   enabled_when=RECOLOR_SHIFT),
+            Option("recolor_brightness", "Brightness (%)", "slider", minimum=-100, maximum=100,
+                   enabled_when=RECOLOR_SHIFT),
+            Option("convert_recursive", "Include subfolders", "bool"),
+        ],
+        run=lambda cfg, paths, log: recolor.recolor_files(_recolor_inputs(cfg, paths), cfg, log=log),
+        done=lambda c, paths: (f"Recolored {c['recolored']}, skipped {c['skipped']}, failed {c['failed']}",
+                               c["output_dir"] or _folder_of(paths[0])),
+        run_label="Save recolored", view="recolor", render=_render_recolor,
     ),
     Tool(
         "halos", "Fix edge halos", "Tools",

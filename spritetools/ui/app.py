@@ -7,12 +7,15 @@ import warnings
 from pathlib import Path
 
 import customtkinter as ctk
+import numpy as np
 
 from ..config import Config
+from ..ops import recolor
 from ..ops.convert import readable_extensions
 from . import filedialogs
 from .theme import FONT, HEADING_FONT, LOG_FONT, THEMES, TITLE_FONT, load_icon
 from .player import Player
+from .recolor_view import RecolorView
 from .tileset_view import TilesetView
 from .tools import TOOLS, TOOLS_BY_KEY
 from .worker import Worker
@@ -90,9 +93,12 @@ class App(ctk.CTk):
         self.log_box._textbox.configure(padx=8, pady=6)
         # views that take the log's place for some tools (Tool.view_name)
         self.player = Player(self)
-        self.tileset_view = TilesetView(self, on_border_size=self.set_border_size)
-        self.views = {"log": self.log_box, "player": self.player, "tileset": self.tileset_view}
-        for view in (self.player, self.tileset_view):
+        self.tileset_view = TilesetView(self, on_border_size=lambda size: self.set_field("border_size", size))
+        self.recolor_view = RecolorView(self, pick=self.recolor_pick, swatch=self.recolor_swatch,
+                                        unswatch=self.recolor_unswatch)
+        self.views = {"log": self.log_box, "player": self.player, "tileset": self.tileset_view,
+                      "recolor": self.recolor_view}
+        for view in (self.player, self.tileset_view, self.recolor_view):
             view.grid(row=2, column=1, sticky="nsew", padx=10, pady=(0, 10))
             view.grid_remove()
 
@@ -153,7 +159,7 @@ class App(ctk.CTk):
                 errors.append(str(e))
                 widget.configure(border_width=1, border_color=t["error"])
                 continue
-            if option.kind in ("int", "int_list"):
+            if option.kind in ("int", "int_list", "text"):
                 widget.configure(border_width=0)
             setattr(self.config_data, option.key, value)
         return errors
@@ -178,7 +184,13 @@ class App(ctk.CTk):
         for option, (var, widget) in self.fields.items():
             if option.enabled_when:
                 on = self.option_enabled(option)
-                widget.configure(state="normal" if on else "disabled", text_color=t["text"] if on else t["muted"])
+                if option.kind == "slider":
+                    widget.configure(state="normal" if on else "disabled",
+                                     button_color=t["button"] if on else t["scrollbar"],
+                                     progress_color=t["button"] if on else t["list_hover"])
+                    self.slider_values[option].configure(text_color=t["text"] if on else t["muted"])
+                else:
+                    widget.configure(state="normal" if on else "disabled", text_color=t["text"] if on else t["muted"])
                 if option in self.field_labels:
                     self.field_labels[option].configure(text_color=t["text"] if on else t["muted"])
 
@@ -217,6 +229,7 @@ class App(ctk.CTk):
                 btn.configure(image=self._icons[name], fg_color="transparent", hover_color=t["list_hover"])
         self.player.apply_theme(t)
         self.tileset_view.apply_theme(t)
+        self.recolor_view.apply_theme(t)
         self.update_status()
         self.show_tool(self.tool.key)
 
@@ -358,6 +371,7 @@ class App(ctk.CTk):
         self.update_input_label()
 
         self.field_labels = {}
+        self.slider_values = {}  # slider option -> label showing its value
         per_row = 2 if len(tool.options) > 4 else 1  # many settings: two columns, so the log keeps room
         for i, option in enumerate(tool.options):
             row, col = 2 + i // per_row, (i % per_row) * 2
@@ -375,7 +389,10 @@ class App(ctk.CTk):
                 label.grid(row=row, column=col, sticky="w", padx=(left, 16), pady=4)
                 self.field_labels[option] = label
                 var = tk.StringVar(value=option.format(value))
-                if option.kind == "choice":
+                if option.kind == "slider":
+                    var = tk.IntVar(value=value)
+                    widget = self.make_slider(option, var)
+                elif option.kind == "choice":
                     widget = ctk.CTkOptionMenu(
                         self.panel, values=list(option.choices), variable=var, width=200,
                         command=self.update_field_states,
@@ -385,10 +402,10 @@ class App(ctk.CTk):
                         dropdown_text_color=t["text"])
                 else:
                     widget = ctk.CTkEntry(self.panel, textvariable=var, border_width=0,
-                                          width=200 if option.kind == "int_list" else 100,
+                                          width=200 if option.kind in ("int_list", "text") else 100,
                                           fg_color=t["list_hover"], text_color=t["text"])
                     widget.bind("<Return>", lambda e: self.run_tool())  # with a preview, this reloads
-                widget.grid(row=row, column=col + 1, sticky="w", pady=4)
+                (widget.master if option.kind == "slider" else widget).grid(row=row, column=col + 1, sticky="w", pady=4)
             self.fields[option] = (var, widget)
         row = 2 + math.ceil(len(tool.options) / per_row)
         self.update_field_states()
@@ -420,6 +437,36 @@ class App(ctk.CTk):
         self.open_btn = ctk.CTkButton(actions, text="Open output folder", width=150, command=self.open_output,
                                       fg_color="transparent", hover_color=t["list_hover"], text_color=t["text"])
         self.update_actions()
+
+    def make_slider(self, option, var):
+        """A slider with its value next to it (for hues, on a chip of that color). Returns the slider;
+        its frame (slider.master) is what goes in the grid."""
+        t = self.t
+        frame = ctk.CTkFrame(self.panel, fg_color="transparent")
+        slider = ctk.CTkSlider(frame, from_=option.minimum, to=option.maximum, variable=var, width=150,
+                               number_of_steps=option.maximum - option.minimum, fg_color=t["list_hover"],
+                               progress_color=t["button"], button_color=t["button"],
+                               button_hover_color=t["button_hover"])
+        slider.pack(side="left")
+        value = ctk.CTkLabel(frame, text="", width=46, corner_radius=6, text_color=t["text"])
+        value.pack(side="left", padx=(6, 0))
+        self.slider_values[option] = value
+
+        def show_value(*_):
+            try:
+                v = var.get()
+            except tk.TclError:
+                return
+            if option.hue:
+                rgb = recolor.hsv_to_rgb(np.array(float(v)), np.array(0.75), np.array(0.85))
+                chip = recolor.rgb_to_hex(tuple(int(c * 255) for c in rgb))
+                value.configure(text=f"{v}°", fg_color=chip, text_color="#111111")
+            else:
+                value.configure(text=f"{v:+d}" if option.minimum < 0 else str(v))
+
+        var.trace_add("write", show_value)
+        show_value()
+        return slider
 
     def wrap_description(self):
         if getattr(self, "description", None) and self.description.winfo_exists():
@@ -626,11 +673,53 @@ class App(ctk.CTk):
             data = {"message": f"Can't read the input: {e}"}
         self.views[tool.view_name()].show(data)
 
-    def set_border_size(self, size):
-        """The tileset view's guides were dragged: put the new size in the Border size field."""
+    def set_field(self, key, value):
+        """A view changed a setting (e.g. a guide was dragged): show it in its field, which
+        updates the view in turn."""
         for option, (var, widget) in self.fields.items():
-            if option.key == "border_size":
-                var.set(str(size))
+            if option.key == key:
+                var.set(option.format(value))
+
+    # ----- recolor view -----------------------------------------------------
+
+    def recolor_pick(self, rgb):
+        """A color was clicked in the before image: in shift mode it's the color to change,
+        in swap mode it's asked what to replace it with."""
+        if self.current_settings().recolor_mode == "swap":
+            self.recolor_swatch(rgb)
+        else:
+            self.set_field("recolor_hue", round(recolor.hue_of(rgb)) % 360)
+
+    def recolor_swatch(self, rgb):
+        if self.dialog_open:
+            return
+        self.dialog_open = True
+        src = recolor.rgb_to_hex(rgb)
+
+        def then(new):
+            self.dialog_open = False
+            if not new:
+                return
+            mapping = dict(self.config_data.recolor_map)
+            if new == src:
+                mapping.pop(src, None)
+            else:
+                mapping[src] = new
+            self.set_setting("recolor_map", mapping)
+
+        filedialogs.ask_color(self, f"Replace {src} with", self.config_data.recolor_map.get(src, src), then)
+
+    def recolor_unswatch(self, rgb):
+        mapping = dict(self.config_data.recolor_map)
+        if mapping.pop(recolor.rgb_to_hex(rgb), None):
+            self.set_setting("recolor_map", mapping)
+
+    def set_setting(self, key, value):
+        """Change a setting that has no field (e.g. the color swaps), save it and redraw the view."""
+        self.collect_options()
+        setattr(self.config_data, key, value)
+        self.save_config()
+        self.refresh_view()
 
     def sync_player(self):
         """Pass the panel's playback settings to the player (invalid ones are ignored)."""

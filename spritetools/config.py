@@ -1,5 +1,6 @@
 import json
 import os
+import re
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
@@ -35,6 +36,14 @@ class Config:
     preview_row: int = 1
     preview_zoom: int = 0
     border_size: int = 16
+    recolor_mode: str = "shift"
+    recolor_map: dict = field(default_factory=dict)  # swap mode: "#rrggbb" -> "#rrggbb"
+    recolor_hue: int = 0
+    recolor_range: int = 30
+    recolor_new_hue: int = 220
+    recolor_saturation: int = 0
+    recolor_brightness: int = 0
+    recolor_folder: str = "recolored"
     preview_background: str = "checker"
     halo_overwrite: bool = False
     theme: str = "dark"
@@ -75,6 +84,11 @@ class Config:
         if cfg.apng_mode not in ("row", "sheet", "rows"):
             cfg.apng_mode = "row"
         cfg.preview_row = max(cfg.preview_row, 1)
+        if cfg.recolor_mode not in ("shift", "swap"):
+            cfg.recolor_mode = "shift"
+        hex_color = re.compile(r"#[0-9a-f]{6}")
+        cfg.recolor_map = {k: v for k, v in cfg.recolor_map.items()
+                           if isinstance(k, str) and isinstance(v, str) and hex_color.fullmatch(k) and hex_color.fullmatch(v)}
         if cfg.theme not in ("dark", "light"):
             cfg.theme = "dark"
         return cfg

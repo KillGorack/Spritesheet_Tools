@@ -1,6 +1,9 @@
 # Spritesheet Tools
 
-A lightweight desktop toolkit for 2D game assets: spritesheets and animations, autotile tilesets, and batch image jobs like format conversion and recoloring.  
+A lightweight desktop toolkit for 2D game assets: spritesheets and animations, autotile tilesets, and batch image jobs like format conversion and recoloring.
+
+I wrote a version of this while creating my first games with the Godot game engine, and have recently let an LLM refactor and combine a few other tools I had as well into this one solution.
+
 Built with Python, [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter), Pillow and apng. Runs on Linux (developed on Fedora/KDE).
 
 <img width="1125" height="636" alt="image" src="https://github.com/user-attachments/assets/d6e9d712-62f4-46bc-be1f-c85eb68bea53" />

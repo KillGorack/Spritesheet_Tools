@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from classes.spritetools import spritetools
+from spritetools.ui.app import App
 
 if __name__ == "__main__":
-    spritetools()
+    App().run()

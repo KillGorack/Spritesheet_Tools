@@ -5,7 +5,7 @@ from pathlib import Path
 
 from PIL import Image
 
-ICON_DIR = Path(__file__).resolve().parents[2] / "icons"  # Lucide icons (ISC), see icons/LICENSE
+ICON_DIR = Path(__file__).resolve().parents[1] / "assets"  # Lucide icons (ISC), see assets/LICENSE
 
 # Same palettes as LULIM
 THEMES = {

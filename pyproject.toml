@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "spritesheet-tools"
+dynamic = ["version"]                      # from spritetools/__init__.py
+description = "Desktop toolkit for 2D game assets: spritesheets, animations, autotile tilesets and batch image jobs"
+readme = "Readme.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = ["customtkinter>=6.0", "Pillow>=11", "apng", "numpy"]
+
+[project.urls]
+Homepage = "https://github.com/KillGorack/Spritesheet_Tools"
+
+[project.scripts]
+spritesheet-tools = "spritetools.__main__:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "spritetools.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["spritetools*"]
+
+[tool.setuptools.package-data]
+spritetools = ["assets/*"]

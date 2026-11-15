@@ -41,6 +41,24 @@ The stitcher, resizer, dissector and converter have a **Fix edge halos** setting
 
 ## Install
 
+Install it with [pipx](https://pipx.pypa.io). It gets its own environment, so nothing else on your system is affected:
+
+```bash
+pipx install git+https://github.com/KillGorack/Spritesheet_Tools.git
+spritesheet-tools --install-menu
+```
+
+The first command installs the `spritesheet-tools` command. The second adds **Spritesheet Tools** to your
+applications menu.
+
+- **Update:** `pipx upgrade spritesheet-tools`
+- **Uninstall:** `spritesheet-tools --uninstall-menu`, then `pipx uninstall spritesheet-tools`. Your settings
+  in `~/.config/spritetools/` are kept.
+
+On Fedora, Tk is a separate package: `sudo dnf install python3-tkinter pipx`
+
+### Run from source (development)
+
 ```bash
 git clone https://github.com/KillGorack/Spritesheet_Tools.git
 cd Spritesheet_Tools
@@ -48,7 +66,7 @@ pip install --user -r requirements.txt
 python3 sprite_sheet_tools.py
 ```
 
-On Fedora, Tk is a separate package: `sudo dnf install python3-tkinter`
+To install your local copy instead of the GitHub one: `pipx install --force .`
 
 ## Using it
 
@@ -104,9 +122,12 @@ Settings are stored in `~/.config/spritetools/config.json`, or `$XDG_CONFIG_HOME
 
 ## Project layout
 
-    sprite_sheet_tools.py    entry point
-    icons/                   toolbar icons (Lucide, ISC license: see icons/LICENSE)
+    pyproject.toml           package info: name, version, dependencies, the spritesheet-tools command
+    sprite_sheet_tools.py    run from source (python3 sprite_sheet_tools.py)
     spritetools/
+      __main__.py            starts the app; --install-menu / --uninstall-menu / --version
+      desktop.py             writes and removes the applications-menu entry
+      assets/                app icon and toolbar icons (Lucide, ISC license: see assets/LICENSE)
       config.py              settings: defaults, load, save
       ops/                   the image processing (no GUI code)
         alpha.py, apng.py, atlas.py, convert.py, frames.py, recolor.py, tileset.py, util.py
@@ -136,4 +157,4 @@ The tests use Python's built-in unittest, so they need nothing beyond the app's 
 
 MIT, do whatever you want.. no biggie.. Not responsible for any damage or data loss.
 
-Icons in `icons/` are from [Lucide](https://lucide.dev) (ISC license).
+Icons in `spritetools/assets/` are from [Lucide](https://lucide.dev) (ISC license).

@@ -20,7 +20,7 @@ from .tileset_view import TilesetView
 from .tools import TOOLS, TOOLS_BY_KEY
 from .worker import Worker
 
-WINDOW_ICON = Path(__file__).resolve().parents[2] / "icon.png"
+WINDOW_ICON = Path(__file__).resolve().parents[1] / "assets" / "icon.png"
 INPUT_BUTTONS = {  # input mode: (button text, file dialog mode)
     "file": ("Choose file…", "file"),
     "files": ("Choose files…", "files"),
